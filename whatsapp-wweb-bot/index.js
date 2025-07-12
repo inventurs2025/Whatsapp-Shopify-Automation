@@ -1,16 +1,14 @@
 const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 
 // ✅ Track current product
 let currentProduct = null;
 
 // ✅ Only these senders are allowed
 const allowedSenders = [
-    '919999888777@c.us', // Vendor
-    '120363045678902@g.us', // Group
+    '919999888777@c.us',
+    '120363045678902@g.us',
     '917999563526@c.us',
     '917470860044@c.us',
 ];
@@ -42,7 +40,7 @@ client.on('message', async msg => {
 
     if (msg.hasMedia) {
         const media = await msg.downloadMedia();
-        const filename = saveImage(media);
+        const filename = `img_${Date.now()}.jpg`;
 
         // ✅ Flush old product if it had description
         if (currentProduct && currentProduct.description.trim() !== '') {
@@ -60,8 +58,14 @@ client.on('message', async msg => {
             };
         }
 
-        currentProduct.images.push(filename);
-        console.log(`🖼️ Added image: ${filename}`);
+        // ✅ Push base64 image (no local file)
+        currentProduct.images.push({
+            filename: filename,
+            base64: media.data,
+            mimetype: media.mimetype
+        });
+
+        console.log(`🖼️ Added image (base64): ${filename}`);
     } else {
         if (!currentProduct) {
             console.log('⚠️ Text received without any image — ignoring.');
@@ -72,23 +76,13 @@ client.on('message', async msg => {
     }
 });
 
-// ✅ Save image
-function saveImage(media) {
-    const folder = path.join(__dirname, 'images');
-    if (!fs.existsSync(folder)) fs.mkdirSync(folder);
-    const filename = `img_${Date.now()}.jpg`;
-    const filepath = path.join(folder, filename);
-    fs.writeFileSync(filepath, Buffer.from(media.data, 'base64'));
-    return filename;
-}
-
-// ✅ Send to Django
+// ✅ Send product to Django API
 async function saveProduct(product) {
     try {
         console.log('🚀 Sending product to Django API...');
         console.log('Sender:', product.sender);
         console.log('Description:', product.description.trim());
-        console.log('Images:', product.images);
+        console.log('Images:', product.images.map(i => i.filename));
 
         const response = await axios.post('http://localhost:8000/api/add-product/', product);
 
