@@ -1,25 +1,25 @@
+# FILE: whatsapp_django_api/products/views.py
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Product
 from django.utils import timezone
 
-# ✅ External dependencies
 import cloudinary.uploader
 import requests
 import json
 import base64
 from io import BytesIO
-
-# ✅ Load environment variables
 import os
+import random
+import string
+import re
+
 from dotenv import load_dotenv
 load_dotenv()
 
-# ✅ Google Gemini
 import google.generativeai as genai
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# --- Upload base64 image to Cloudinary ---
 def upload_to_cloudinary_base64(image_obj):
     decoded = base64.b64decode(image_obj['base64'])
     result = cloudinary.uploader.upload(
@@ -29,94 +29,93 @@ def upload_to_cloudinary_base64(image_obj):
     )
     return result["secure_url"]
 
-# --- Use Gemini to extract product fields ---
 def parse_with_gemini(description):
     prompt = f"""
 You are a Shopify product parser. The input is a product description from a vendor sent on WhatsApp.
 
 Extract and return:
-- title: A clean short title like "Pure Gajji Silk Banarasi Saree"
-- body_html: Use HTML formatting for fabric, blouse, and work
-- price: ONLY extract from SP / Sp / Selling Price (ignore CP, Cost Price)
+- title: A clean short title
+- body_html: Format in HTML
+- price: From SP / Sp / Selling Price (ignore CP)
 - size: Always return "Free Size"
-
-If SP or Selling Price is missing, leave "price" as "0".
-
-Clean the price by extracting only digits (e.g., "Sp - 12800/-" → "12800").
+- tags: comma-separated list of keywords or materials
+- category: choose from ethnic, western, casual, formal, accessories
+- collections: comma-separated list if found
 
 Input:
-\"\"\"
-{description}
-\"\"\"
+""" + description + """
 
-Only respond with valid JSON like:
-{{
+Respond in JSON like:
+{
   "title": "...",
   "body_html": "...",
   "price": "...",
-  "size": "Free Size"
-}}
+  "size": "Free Size",
+  "tags": "cotton, kurti",
+  "category": "ethnic",
+  "collections": "new, trending"
+}
 """
 
     model = genai.GenerativeModel("models/gemini-1.5-flash")
     response = model.generate_content(prompt)
 
-    import re
     try:
         json_text = re.search(r'{.*}', response.text, re.DOTALL).group()
         return json.loads(json_text)
     except Exception:
         raise Exception("Gemini response format invalid:\n" + response.text)
 
+def generate_unique_sku():
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
 
-# --- Send to Shopify ---
-def send_to_shopify(product_data, image_urls):
-    shopify_store = os.getenv("SHOPIFY_STORE_DOMAIN")
-    shopify_api_key = os.getenv("SHOPIFY_API_KEY")
-    shopify_password = os.getenv("SHOPIFY_API_PASSWORD")
+def send_to_shopify(data, image_urls):
+    shopify_url = f"https://{os.getenv('SHOPIFY_STORE_DOMAIN')}/admin/api/2024-01/products.json"
+    auth = (os.getenv("SHOPIFY_API_KEY"), os.getenv("SHOPIFY_API_PASSWORD"))
 
-    shopify_url = f"https://{shopify_store}/admin/api/2024-01/products.json"
+    price = str(data.get("price", "0"))
+    compare_price = str(int(price) + 2000) if price.isdigit() else price
 
-    shopify_payload = {
+    payload = {
         "product": {
-            "title": product_data["title"],
-            "body_html": product_data["body_html"],
+            "title": data["title"],
+            "body_html": data["body_html"],
+            "vendor": data.get("vendor", "DEFAULT"),
+            "product_type": data.get("category", "Uncategorized"),
+            "tags": data.get("tags", ""),
+            "published_scope": "global",
+            "status": "active",
             "images": [{"src": url} for url in image_urls],
+            "options": [{"name": "Size", "values": [data.get("size", "Free Size")]}],
             "variants": [{
-                "price": product_data.get("price", "0.00"),
-                "option1": product_data.get("size", "Free Size")
+                "price": price,
+                "compare_at_price": compare_price,
+                "sku": generate_unique_sku(),
+                "taxable": False,
+                "inventory_quantity": 5,
+                "option1": data.get("size", "Free Size"),
+                "weight": 2.0,
+                "weight_unit": "kg",
+                "requires_shipping": True
             }]
         }
     }
 
-    r = requests.post(
-        shopify_url,
-        auth=(shopify_api_key, shopify_password),
-        headers={"Content-Type": "application/json"},
-        data=json.dumps(shopify_payload)
-    )
-    
+    r = requests.post(shopify_url, auth=auth, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
     return r.json()
 
-# --- Main API endpoint ---
 @api_view(['POST'])
 def add_product(request):
-    print("🚀 /api/add-product/ was HIT!")
     data = request.data
-
     images = data.get('images', [])
     description = data.get('description', '').strip()
     sender = data.get('sender', '')
-    timestamp = data.get('timestamp', '')
+    vendor = data.get('vendor', 'DEFAULT')
 
     if not images or not description or not sender:
-        return Response({
-            "status": "error", 
-            "message": "Missing required fields: images, description, or sender"
-        }, status=400)
+        return Response({"status": "error", "message": "Missing required fields"}, status=400)
 
     try:
-        # Save product to DB (history)
         product = Product.objects.create(
             sender=sender,
             description=description,
@@ -124,41 +123,33 @@ def add_product(request):
             timestamp=timezone.now()
         )
 
-        # Step 1: Upload images to Cloudinary
         image_urls = [upload_to_cloudinary_base64(img) for img in images]
+        parsed_data = parse_with_gemini(description)
+        parsed_data["vendor"] = vendor
 
-        # Step 2: Parse description using Gemini
-        product_data = parse_with_gemini(description)
-
-        # Step 3: Send to Shopify
-        shopify_response = send_to_shopify(product_data, image_urls)
+        shopify_response = send_to_shopify(parsed_data, image_urls)
 
         return Response({
             "status": "success",
-            "message": "Product saved and sent to Shopify",
+            "message": "Product sent to Shopify",
             "product_id": product.id,
             "shopify_response": shopify_response
         })
 
     except Exception as e:
-        print("❌ Error:", str(e))
-        return Response({
-            "status": "error",
-            "message": str(e)
-        }, status=500)
+        return Response({"status": "error", "message": str(e)}, status=500)
 
-# --- GET all products ---
 @api_view(['GET'])
 def get_products(request):
     products = Product.objects.all()
-    data = []
-    for product in products:
-        data.append({
-            'id': product.id,
-            'sender': product.sender,
-            'description': product.description,
-            'images': product.images,
-            'timestamp': product.timestamp,
-            'created_at': product.created_at
-        })
-    return Response({"status": "success", "products": data})
+    return Response({
+        "status": "success",
+        "products": [{
+            "id": p.id,
+            "sender": p.sender,
+            "description": p.description,
+            "images": p.images,
+            "timestamp": p.timestamp,
+            "created_at": p.created_at
+        } for p in products]
+    })

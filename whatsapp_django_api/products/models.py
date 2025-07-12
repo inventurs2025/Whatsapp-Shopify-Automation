@@ -4,6 +4,7 @@ from django.db import models
 
 class Product(models.Model):
     sender = models.CharField(max_length=255)
+    vendor = models.CharField(max_length=100, default='DEFAULT')
     description = models.TextField()
     images = models.JSONField(default=list)  # Store image filenames as JSON array
     timestamp = models.DateTimeField(auto_now_add=True)
