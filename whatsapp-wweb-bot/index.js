@@ -1,3 +1,4 @@
+// FILE: whatsapp-wweb-bot/index.js
 const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
@@ -8,10 +9,10 @@ let currentVendor = 'DEFAULT';
 const knownVendors = new Set();
 
 const allowedSenders = [
-    // '919999888777@c.us',
-    // '120363045678902@g.us',
+    '919999888777@c.us',
+    '120363045678902@g.us',
     '917999563526@c.us',
-    '917000393711@c.us',
+    '917000393711@c.us'
 ];
 
 const client = new Client({
@@ -91,8 +92,10 @@ async function saveProduct(product) {
     try {
         const response = await axios.post('http://localhost:8000/api/add-product/', product);
         if (response.data.status === 'success') {
+            const title = response.data.title;
+            const price = response.data.price;
+            await client.sendMessage(product.sender, `✅ *${title}* uploaded to Shopify for ₹${price}\n🧾 Vendor: ${product.vendor}`);
             console.log('✅ Product uploaded to Shopify.');
-            await client.sendMessage(product.sender, `✅ Product uploaded to Shopify.`);
         } else {
             console.log('❌ Save failed:', response.data.message);
         }

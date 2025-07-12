@@ -102,7 +102,7 @@ def send_to_shopify(data, image_urls):
     }
 
     r = requests.post(shopify_url, auth=auth, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
-    return r.json()
+    return r.json(), data["title"], price
 
 @api_view(['POST'])
 def add_product(request):
@@ -127,12 +127,15 @@ def add_product(request):
         parsed_data = parse_with_gemini(description)
         parsed_data["vendor"] = vendor
 
-        shopify_response = send_to_shopify(parsed_data, image_urls)
+        shopify_response, title, price = send_to_shopify(parsed_data, image_urls)
 
+        # return product info for WhatsApp bot to use
         return Response({
             "status": "success",
             "message": "Product sent to Shopify",
             "product_id": product.id,
+            "title": title,
+            "price": price,
             "shopify_response": shopify_response
         })
 
