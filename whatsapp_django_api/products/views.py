@@ -4,7 +4,6 @@ from .models import Product
 from django.utils import timezone
 
 # ✅ External dependencies
-import openai
 import cloudinary.uploader
 import requests
 import json
@@ -16,15 +15,12 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+# ✅ Google Gemini
+import google.generativeai as genai
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
 # --- Upload base64 image to Cloudinary ---
 def upload_to_cloudinary_base64(image_obj):
-    """
-    image_obj = {
-        'filename': 'img_123.jpg',
-        'base64': '...',       # base64 string
-        'mimetype': 'image/jpeg'
-    }
-    """
     decoded = base64.b64decode(image_obj['base64'])
     result = cloudinary.uploader.upload(
         BytesIO(decoded),
@@ -33,45 +29,44 @@ def upload_to_cloudinary_base64(image_obj):
     )
     return result["secure_url"]
 
-# --- Use OpenAI to extract product fields ---
-from openai import OpenAI
+# --- Use Gemini to extract product fields ---
+def parse_with_gemini(description):
+    prompt = f"""
+You are a Shopify product parser. The input is a product description from a vendor sent on WhatsApp.
 
-def parse_with_openai(description):
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+Extract and return:
+- title: A clean short title like "Pure Gajji Silk Banarasi Saree"
+- body_html: Use HTML formatting for fabric, blouse, and work
+- price: ONLY extract from SP / Sp / Selling Price (ignore CP, Cost Price)
+- size: Always return "Free Size"
 
-    system_prompt = "You are a Shopify product parser. Return JSON with: title, body_html, price, and size."
-    user_prompt = f"""
-Description:
-\"\"\" 
+If SP or Selling Price is missing, leave "price" as "0".
+
+Clean the price by extracting only digits (e.g., "Sp - 12800/-" → "12800").
+
+Input:
+\"\"\"
 {description}
 \"\"\"
 
-Return JSON like:
+Only respond with valid JSON like:
 {{
   "title": "...",
   "body_html": "...",
   "price": "...",
-  "size": "..."
-}}"""
+  "size": "Free Size"
+}}
+"""
 
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.3
-    )
+    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    response = model.generate_content(prompt)
 
-    return json.loads(response.choices[0].message.content)
-# def parse_with_openai(description):
-#     # FAKE hardcoded response for now (while fixing quota)
-#     return {
-#         "title": "Premium Handloom Banarasi Saree",
-#         "body_html": "<p>100% Pure Tissue Handloom Banarasi Silk Saree with Zardozi, Pearl, Sequins work.</p>",
-#         "price": "9800",
-#         "size": "Free Size"
-#     }
+    import re
+    try:
+        json_text = re.search(r'{.*}', response.text, re.DOTALL).group()
+        return json.loads(json_text)
+    except Exception:
+        raise Exception("Gemini response format invalid:\n" + response.text)
 
 
 # --- Send to Shopify ---
@@ -132,8 +127,8 @@ def add_product(request):
         # Step 1: Upload images to Cloudinary
         image_urls = [upload_to_cloudinary_base64(img) for img in images]
 
-        # Step 2: Parse description
-        product_data = parse_with_openai(description)
+        # Step 2: Parse description using Gemini
+        product_data = parse_with_gemini(description)
 
         # Step 3: Send to Shopify
         shopify_response = send_to_shopify(product_data, image_urls)
@@ -167,4 +162,3 @@ def get_products(request):
             'created_at': product.created_at
         })
     return Response({"status": "success", "products": data})
-

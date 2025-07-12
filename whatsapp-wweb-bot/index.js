@@ -11,6 +11,8 @@ const allowedSenders = [
     '120363045678902@g.us',
     '917999563526@c.us',
     '917470860044@c.us',
+    '919425758368@c.us',
+    
 ];
 
 // ✅ Setup WhatsApp client
