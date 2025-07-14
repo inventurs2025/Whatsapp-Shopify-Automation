@@ -92,9 +92,22 @@ async function saveProduct(product) {
     try {
         const response = await axios.post('http://localhost:8000/api/add-product/', product);
         if (response.data.status === 'success') {
-            const title = response.data.title;
-            const price = response.data.price;
-            await client.sendMessage(product.sender, `✅ *${title}* uploaded to Shopify for ₹${price}\n🧾 Vendor: ${product.vendor}`);
+            const d = response.data.shopify_data;
+
+            const msgBody = `✅ *Product Uploaded to Shopify!*
+
+🛍️ *Title*: ${d.title}
+🏷️ *Category*: ${d.category}
+📦 *Collections*: ${d.collections}
+💰 *Price*: ₹${d.price} (Compare at ₹${d.compare_at_price})
+📏 *Size*: ${d.size}
+🔖 *Tags*: ${d.tags}
+🔢 *SKU*: ${d.sku}
+🚚 *Shipping*: 2kg, Physical Product
+🛠️ *Vendor*: ${d.vendor}
+📌 *Status*: Active`;
+
+            await client.sendMessage(product.sender, msgBody);
             console.log('✅ Product uploaded to Shopify.');
         } else {
             console.log('❌ Save failed:', response.data.message);
@@ -106,7 +119,7 @@ async function saveProduct(product) {
 
 async function createVendorInShopify(vendorCode) {
     console.log(`🧾 Creating vendor in Shopify: ${vendorCode}`);
-    // Note: Shopify does not have a vendor creation API. This is logical handling only.
+    // Shopify doesn't have a vendor creation API — logical tracking only
 }
 
 client.on('disconnected', reason => {
