@@ -1,1 +1,5 @@
 pip install django djangorestframework django-cors-headers
+pip install openai cloudinary
+pip install requests
+pip install python-dotenv
+pip install google-generativeai
