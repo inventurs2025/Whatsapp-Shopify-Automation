@@ -12,7 +12,7 @@ const allowedSenders = [
     '919999888777@c.us',
     '120363045678902@g.us',
     '917999563526@c.us',
-    '917000393711@c.us'
+    '919301950044@c.us'
 ];
 
 const client = new Client({
