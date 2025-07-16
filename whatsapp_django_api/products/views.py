@@ -436,13 +436,11 @@ def add_product(request):
         print("🧠 Parsing description using Groq...")
         parsed_data = parse_with_groq(description)
         parsed_data["vendor"] = vendor
-        
-        # Debug: Print all parsed data
+
         print("📋 ALL PARSED DATA:")
         for key, value in parsed_data.items():
             print(f"  {key}: '{value}'")
-        
-        # Validate critical fields
+
         if not parsed_data.get("title"):
             parsed_data["title"] = "Fashion Product"
         if not parsed_data.get("product_type"):
@@ -454,14 +452,13 @@ def add_product(request):
 
         print("🚀 Sending product to Shopify...")
         shopify_response, title, price_int, cost_int = send_to_shopify(parsed_data, image_urls)
-        
+
         if not shopify_response or "product" not in shopify_response:
             raise Exception("Invalid Shopify response")
-            
+
         product_id = shopify_response["product"]["id"]
         print(f"✅ Product created with ID: {product_id}")
 
-        # Handle collections (requirement #20)
         collections = parsed_data.get("collections", "")
         if collections:
             print("📚 Processing collections...")
@@ -471,7 +468,6 @@ def add_product(request):
                 if collection_id:
                     add_product_to_collection(product_id, collection_id)
 
-        # Handle category creation (requirement #1)
         category = parsed_data.get("category", "")
         if category:
             print(f"🏷️ Processing category: {category}")
@@ -479,7 +475,6 @@ def add_product(request):
             if category_id:
                 add_product_to_collection(product_id, category_id)
 
-        # Add metafields with dynamic data from parsed content
         print("📎 Adding metafields...")
         metafields_data = {
             "category_text": parsed_data.get("category", "Fashion"),
@@ -497,38 +492,55 @@ def add_product(request):
             "shipping_weight_text": "2kg",
             "quality_text": "Premium Quality Checked"
         }
-        
-        # Calculate and add profit margin
+
         try:
             profit_margin = ((price_int - cost_int) / price_int) * 100
             metafields_data["profit_margin"] = f"{profit_margin:.1f}%"
         except:
             metafields_data["profit_margin"] = "Not calculated"
-        
-        # Add color from image analysis (requirement #12)
+
         if image_urls:
             print("🎨 Analyzing image color...")
             primary_color = analyze_image_color(image_urls[0])
             if primary_color and primary_color != "Multicolor":
                 metafields_data["color"] = primary_color
                 print(f"🎨 Detected color: {primary_color}")
-        
-        # Add metafields one by one
+
+        # ✅ Add correct metafield types
+        metafield_type_map = {
+            "cost_price_value": "number_integer",
+            "size_guide_text": "multi_line_text_field",
+            "care_instructions_text": "multi_line_text_field",
+            "product_weight_text": "single_line_text_field",
+            "shipping_weight_text": "single_line_text_field",
+            "quality_text": "single_line_text_field",
+            "category_text": "single_line_text_field",
+            "fabric_text": "single_line_text_field",
+            "style_text": "single_line_text_field",
+            "pattern_text": "single_line_text_field",
+            "work_text": "single_line_text_field",
+            "country_origin": "single_line_text_field",
+            "collections_text": "single_line_text_field",
+            "material_origin": "single_line_text_field",
+            "profit_margin": "single_line_text_field",
+            "color": "single_line_text_field",
+        }
+
         metafield_success_count = 0
         for key, value in metafields_data.items():
-            if value and str(value).strip() and str(value).strip() != "":
+            if value and str(value).strip():
                 print(f"📎 Adding metafield: {key} = '{value}'")
-                success = add_metafield(product_id, key, value)
+                field_type = metafield_type_map.get(key, "single_line_text_field")
+                success = add_metafield(product_id, key, value, field_type)
                 if success:
                     metafield_success_count += 1
                 else:
                     print(f"❌ Failed to add metafield: {key}")
-                # Add small delay to avoid rate limiting
                 import time
                 time.sleep(0.2)
             else:
                 print(f"⚠️ Skipping empty metafield: {key}")
-        
+
         print(f"✅ Added {metafield_success_count}/{len(metafields_data)} metafields successfully")
         print(f"📏 Size Guide: {parsed_data.get('size_guide', 'Not specified')}")
         print(f"🧼 Care Instructions: {parsed_data.get('care_instructions', 'Not specified')}")
@@ -558,6 +570,7 @@ def add_product(request):
             "status": "error", 
             "message": f"Failed to create product: {str(e)}"
         }, status=500)
+
 
 @api_view(['GET'])
 def get_products(request):
