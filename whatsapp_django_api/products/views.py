@@ -482,20 +482,20 @@ def add_product(request):
         # Add metafields with dynamic data from parsed content
         print("📎 Adding metafields...")
         metafields_data = {
-            "category": parsed_data.get("category", "Fashion"),
-            "fabric": parsed_data.get("fabric", ""),
-            "style": parsed_data.get("style", ""),
-            "pattern": parsed_data.get("pattern", ""),
-            "work": parsed_data.get("work", ""),
-            "cost_price": str(cost_int),
-            "country_of_origin": "India",
-            "collections": parsed_data.get("collections", ""),
-            "size_guide": parsed_data.get("size_guide", "Free Size - One size fits most"),
-            "care_instructions": parsed_data.get("care_instructions", "Dry clean recommended"),
+            "category_text": parsed_data.get("category", "Fashion"),
+            "fabric_text": parsed_data.get("fabric", ""),
+            "style_text": parsed_data.get("style", ""),
+            "pattern_text": parsed_data.get("pattern", ""),
+            "work_text": parsed_data.get("work", ""),
+            "cost_price_value": str(cost_int),
+            "country_origin": "India",
+            "collections_text": parsed_data.get("collections", ""),
+            "size_guide_text": parsed_data.get("size_guide", "Free Size - One size fits most"),
+            "care_instructions_text": parsed_data.get("care_instructions", "Dry clean recommended"),
             "material_origin": "Made in India",
-            "product_weight": "2kg",
-            "shipping_weight": "2kg",
-            "quality_assurance": "Premium Quality Checked"
+            "product_weight_text": "2kg",
+            "shipping_weight_text": "2kg",
+            "quality_text": "Premium Quality Checked"
         }
         
         # Calculate and add profit margin
