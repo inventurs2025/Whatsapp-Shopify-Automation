@@ -16,8 +16,11 @@ import re
 from dotenv import load_dotenv
 load_dotenv()
 
-import google.generativeai as genai
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+from openai import OpenAI
+client = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
+)
 
 def upload_to_cloudinary_base64(image_obj):
     try:
@@ -33,117 +36,75 @@ def upload_to_cloudinary_base64(image_obj):
         print(f"❌ Cloudinary upload failed: {e}")
         raise
 
-# def parse_with_gemini(description):
-#     prompt = f"""
-# You are a Shopify product parser. The input is a product description from a vendor sent on WhatsApp.
-
-# Extract and return:
-# - title: A clean short title
-# - body_html: Format in HTML
-# - price: From SP / Sp / Selling Price (ignore CP)
-# - size: Always return "Free Size"
-# - tags: comma-separated list of keywords or materials
-# - category: choose from ethnic, western, casual, formal, accessories
-# - collections: comma-separated list if found
-
-# Input:
-# {description}
-
-# Respond in JSON like:
-# {{
-#   "title": "...",
-#   "body_html": "...",
-#   "price": "...",
-#   "size": "Free Size",
-#   "tags": "cotton, kurti",
-#   "category": "ethnic",
-#   "collections": "new, trending"
-# }}
-# """
-#     try:
-#         # model = genai.GenerativeModel("models/gemini-1.5-flash")
-#         model = genai.GenerativeModel("models/gemini-1.5-pro")
-#         response = model.generate_content(prompt)
-#         print("🔍 Gemini raw response:", response.text)
-
-#         json_text = re.search(r'{.*}', response.text, re.DOTALL).group()
-#         parsed = json.loads(json_text)
-#         print("✅ Parsed Gemini data:", parsed)
-#         return parsed
-#     except Exception as e:
-#         print("❌ Gemini parsing failed:", str(e))
-#         raise Exception("Gemini response failed due to: " + str(e))
-#     # except Exception as e:
-#     #     print("❌ Gemini parsing failed:", str(e))
-#     #     raise Exception("Gemini response format invalid:\n" + response.text)
-
-
-import openai
-from openai import OpenAI
-import os
-import re
-import json
-
-client = OpenAI(
-    api_key=os.getenv("GROQ_API_KEY"),
-    base_url="https://api.groq.com/openai/v1"
-)
-
 def parse_with_groq(description):
     prompt = f"""
-You are a Shopify product parser. The input is a product description from a vendor sent on WhatsApp.
+You are a Shopify product parser.
+
+Given a raw WhatsApp-style product description, generate a complete Shopify product listing. Use your understanding of the content to intelligently generate all fields.
 
 Extract and return:
-- title: A clean short title
-- body_html: Format in HTML
-- price: From SP / Sp / Selling Price (ignore CP)
-- size: Always return "Free Size"
-- tags: comma-separated list of keywords or materials
-- category: choose from ethnic, western, casual, formal, accessories
-- collections: comma-separated list if found
+- title
+- body_html
+- price (from SP / Sp / Selling Price only)
+- size (always 'Free Size')
+- tags
+- product_type
+- category
+- fabric
+- color
+- style
+- collections
 
-Input:
-{description}
-
-Respond in JSON like:
+Respond only in valid JSON like:
 {{
   "title": "...",
   "body_html": "...",
   "price": "...",
   "size": "Free Size",
-  "tags": "cotton, kurti",
-  "category": "ethnic",
-  "collections": "new, trending"
+  "tags": "...",
+  "product_type": "...",
+  "category": "...",
+  "fabric": "...",
+  "color": "...",
+  "style": "...",
+  "collections": "..."
 }}
-"""
 
+WhatsApp description:
+{description}
+"""
     try:
         response = client.chat.completions.create(
-            # model="mixtral-8x7b-32768",
             model="llama3-70b-8192",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7
         )
         content = response.choices[0].message.content
         print("🔍 Groq raw response:", content)
-
         json_text = re.search(r'{.*}', content, re.DOTALL).group()
         parsed = json.loads(json_text)
         print("✅ Parsed Groq data:", parsed)
         return parsed
-
     except Exception as e:
         print("❌ Groq parsing failed:", str(e))
         raise Exception("Groq response format invalid or failed")
 
-
-
-
-
-
-
 def generate_unique_sku():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+
+def add_metafield(product_id, key, value):
+    url = f"https://{os.getenv('SHOPIFY_STORE_DOMAIN')}/admin/api/2024-01/products/{product_id}/metafields.json"
+    auth = (os.getenv("SHOPIFY_API_KEY"), os.getenv("SHOPIFY_API_PASSWORD"))
+    payload = {
+        "metafield": {
+            "namespace": "custom",
+            "key": key,
+            "value": value,
+            "type": "single_line_text_field"
+        }
+    }
+    r = requests.post(url, auth=auth, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
+    print(f"📎 Metafield [{key}] response:", r.status_code)
 
 def send_to_shopify(data, image_urls):
     try:
@@ -158,7 +119,7 @@ def send_to_shopify(data, image_urls):
                 "title": data["title"],
                 "body_html": data["body_html"],
                 "vendor": data.get("vendor", "DEFAULT"),
-                "product_type": data.get("category", "Uncategorized"),
+                "product_type": data.get("product_type", "Uncategorized"),
                 "tags": data.get("tags", ""),
                 "published_scope": "global",
                 "status": "active",
@@ -178,11 +139,9 @@ def send_to_shopify(data, image_urls):
             }
         }
 
-        print("📦 Shopify Payload:\n", json.dumps(payload, indent=2))
-
+        print("🛆 Shopify Payload:\n", json.dumps(payload, indent=2))
         r = requests.post(shopify_url, auth=auth, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
-        print("📡 Shopify Response:", r.status_code, r.text)
-
+        print("🛁 Shopify Response:", r.status_code, r.text)
         r.raise_for_status()
         return r.json(), data["title"], price
     except Exception as e:
@@ -191,7 +150,6 @@ def send_to_shopify(data, image_urls):
 
 @api_view(['POST'])
 def add_product(request):
-    
     data = request.data
     images = data.get('images', [])
     description = data.get('description', '').strip()
@@ -216,13 +174,18 @@ def add_product(request):
         print("⬆️ Uploading images to Cloudinary...")
         image_urls = [upload_to_cloudinary_base64(img) for img in images]
 
-        print("🧠 Parsing description using Groq...")
-        # parsed_data = parse_with_gemini(description)
+        print("🧐 Parsing description using Groq...")
         parsed_data = parse_with_groq(description)
         parsed_data["vendor"] = vendor
 
         print("🚀 Sending product to Shopify...")
         shopify_response, title, price = send_to_shopify(parsed_data, image_urls)
+        product_id = shopify_response["product"]["id"]
+
+        # Add metafields
+        for key in ["category", "fabric", "color", "style"]:
+            if key in parsed_data:
+                add_metafield(product_id, key, parsed_data[key])
 
         return Response({
             "status": "success",
