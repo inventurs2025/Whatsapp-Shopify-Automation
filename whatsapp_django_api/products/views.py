@@ -81,6 +81,11 @@ REQUIRED FIELDS:
 13. collections (comma-separated collection names)
 14. size_guide (extract size information from description, create professional size guide)
 15. care_instructions (extract care/washing instructions from description)
+16. fabric_details3 (a full-sentence natural language description of the fabric feel, texture, and best use cases.)
+17. occasion (short description like "Wedding, Partywear, Daily use")
+18. specifications (clean bullet points or short lines about product features)
+19. technique (craftsmanship or method used like Zardozi, Block Print, Handloom, Tie-Dye, Kalamkari – extract from description or infer from style/work if possible. Leave empty if not found)
+
 
 PRICE EXTRACTION RULES:
 - Look for patterns like: "ORIGINAL PRICE", "cost price", "SALE PRICE", "MRP", "Price"
@@ -107,6 +112,8 @@ DESCRIPTION PARSING:
 - Extract work from "WORK", "Embroidery", "Details"
 - Create professional HTML without prices
 - Generate relevant tags and collections
+- Extract technique from terms like "Zardozi", "Handloom", "Block Print", "Printed", "Embroidered", "Kalamkari", etc. If not explicitly mentioned, infer from style or work fields when possible.
+
 
 EXAMPLE FORMATS TO HANDLE:
 Format 1: "FABRIC - Pure Silk, WORK - Zardozi, PRICE - 5000/8000, Care - Dry clean only"
@@ -129,12 +136,17 @@ EXAMPLE OUTPUT:
   "work": "Zardozi, Sequins, Pearl, Anchor",
   "collections": "Festive Collection,Banarasi Special,Wedding Collection",
   "size_guide": "Free Size - One size fits most, suitable for all body types",
-  "care_instructions": "Dry clean recommended to maintain fabric quality and embroidery work"
+  "care_instructions": "Dry clean recommended to maintain fabric quality and embroidery work",
+  "fabric_details3": "This Pure Khadi Georgette fabric has a smooth and lustrous texture, perfect for special occasions."
+  "occasion": "Wedding, Festive Wear",
+  "specifications": "- Premium Pure Georgette\n- Zardozi Embroidery\n- Matching Blouse Piece Included",
+  "technique": "Zardozi embroidery with sequins and pearls"
 }}
 
 DESCRIPTION TO PARSE:
 {description}
 """
+    import yaml 
     try:
         response = client.chat.completions.create(
             model="llama3-70b-8192",
@@ -143,8 +155,18 @@ DESCRIPTION TO PARSE:
         )
         content = response.choices[0].message.content
         print("🔍 Groq raw response:", content)
-        json_text = re.search(r'{.*}', content, re.DOTALL).group()
-        parsed = json.loads(json_text)
+        # json_text = re.search(r'{.*}', content, re.DOTALL).group()
+        # parsed = json.loads(json_text)
+        
+        match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", content)
+        if not match:
+            match = re.search(r"(\{[\s\S]*?\})", content)
+        if not match:
+            raise Exception("No valid JSON found")
+
+        # Use YAML parser to safely parse multiline JSON-like structure
+        parsed = yaml.safe_load(match.group(1))
+        
         print("✅ Parsed Groq data:", parsed)
         return parsed
     except Exception as e:
@@ -486,11 +508,17 @@ def add_product(request):
             "country_origin": "India",
             "collections_text": parsed_data.get("collections", ""),
             "size_guide_text": parsed_data.get("size_guide", "Free Size - One size fits most"),
-            "care_instructions_text": parsed_data.get("care_instructions", "Dry clean recommended"),
+            "care_instructions_text": parsed_data.get("care_instructions_text", "Dry clean recommended"),
             "material_origin": "Made in India",
             "product_weight_text": "2kg",
             "shipping_weight_text": "2kg",
-            "quality_text": "Premium Quality Checked"
+            "quality_text": "Premium Quality Checked",
+            
+            "specifications": parsed_data.get("specifications", ""),
+            "occasion": parsed_data.get("occasion", ""),
+            "fabric_details3": parsed_data.get("fabric_details3", ""),
+            "technique": parsed_data.get("technique", ""),
+            
         }
 
         try:
@@ -524,6 +552,10 @@ def add_product(request):
             "material_origin": "single_line_text_field",
             "profit_margin": "single_line_text_field",
             "color": "single_line_text_field",
+            "fabric_details3": "multi_line_text_field",
+            "occasion": "single_line_text_field",
+            "specifications": "multi_line_text_field",
+            "technique": "single_line_text_field"
         }
 
         metafield_success_count = 0
