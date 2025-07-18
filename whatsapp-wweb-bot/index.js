@@ -1,4 +1,3 @@
-// FILE: whatsapp-wweb-bot/index.js
 const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
@@ -52,6 +51,19 @@ client.on('message', async msg => {
         }
     }
 
+    // Start new product with command
+    if (/^!product/i.test(body)) {
+        currentProduct = {
+            images: [],
+            description: '',
+            sender: senderId,
+            timestamp: new Date().toISOString(),
+            vendor: currentVendor
+        };
+        await msg.reply("📝 *Product creation started*\nSend images first then description");
+        return;
+    }
+
     // Separator emoji = flush
     if (body.includes(SEPARATOR_EMOJI)) {
         if (currentProduct && currentProduct.description.trim() !== '') {
@@ -94,7 +106,10 @@ async function saveProduct(product) {
         if (response.data.status === 'success') {
             const title = response.data.title;
             const price = response.data.price;
-            await client.sendMessage(product.sender, `✅ *${title}* uploaded to Shopify for ₹${price}\n🧾 Vendor: ${product.vendor}`);
+            await client.sendMessage(
+                product.sender, 
+                `✅ *${title}* uploaded to Shopify for ₹${price}\n🧾 Vendor: ${product.vendor}`
+            );
             console.log('✅ Product uploaded to Shopify.');
         } else {
             console.log('❌ Save failed:', response.data.message);
@@ -106,7 +121,7 @@ async function saveProduct(product) {
 
 async function createVendorInShopify(vendorCode) {
     console.log(`🧾 Creating vendor in Shopify: ${vendorCode}`);
-    // Note: Shopify does not have a vendor creation API. This is logical handling only.
+    // Note: Shopify doesn't have separate vendor creation API
 }
 
 client.on('disconnected', reason => {
