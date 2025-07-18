@@ -55,12 +55,13 @@ client.on('message', async msg => {
     if (/^!product/i.test(body)) {
         currentProduct = {
             images: [],
+            videos: [],
             description: '',
             sender: senderId,
             timestamp: new Date().toISOString(),
             vendor: currentVendor
         };
-        await msg.reply("📝 *Product creation started*\nSend images first then description");
+        await msg.reply("📝 *Product creation started*\nSend images/videos first then description");
         return;
     }
 
@@ -74,12 +75,34 @@ client.on('message', async msg => {
     }
 
     if (msg.hasMedia) {
+        console.log('📦 Media message received:', {
+            type: msg.type,
+            mimetype: msg.mimetype,
+            hasMedia: msg.hasMedia,
+            id: msg.id,
+            from: msg.from,
+            to: msg.to
+        });
         const media = await msg.downloadMedia();
-        const filename = `img_${Date.now()}.jpg`;
+        if (!media) {
+            console.warn('⚠️ Media download failed or returned undefined. Skipping this media message.');
+            return;
+        }
+        console.log('📦 Media download result:', {
+            mimetype: media.mimetype,
+            dataLength: media.data ? media.data.length : 0
+        });
+        let filename;
+        if (media.mimetype.startsWith('video/')) {
+            filename = `vid_${Date.now()}.mp4`;
+        } else {
+            filename = `img_${Date.now()}.jpg`;
+        }
 
         if (!currentProduct) {
             currentProduct = {
                 images: [],
+                videos: [],
                 description: '',
                 sender: senderId,
                 timestamp: new Date().toISOString(),
@@ -87,12 +110,19 @@ client.on('message', async msg => {
             };
         }
 
-        currentProduct.images.push({
+        const fileObj = {
             filename,
             base64: media.data,
             mimetype: media.mimetype
-        });
-        console.log(`🖼️ Added image: ${filename}`);
+        };
+
+        if (media.mimetype.startsWith('video/')) {
+            currentProduct.videos.push(fileObj);
+            console.log(`🎬 Added video: ${filename}`);
+        } else {
+            currentProduct.images.push(fileObj);
+            console.log(`🖼️ Added image: ${filename}`);
+        }
     } else {
         if (!currentProduct) return;
         currentProduct.description += body + '\n';

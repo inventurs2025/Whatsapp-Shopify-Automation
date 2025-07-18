@@ -59,6 +59,22 @@ def upload_to_cloudinary_base64(image_obj):
         print(f"❌ Cloudinary upload failed: {e}")
         raise
 
+def upload_to_cloudinary_video(video_obj):
+    try:
+        decoded = base64.b64decode(video_obj['base64'])
+        result = cloudinary.uploader.upload(
+            BytesIO(decoded),
+            public_id=video_obj['filename'].split('.')[0],
+            resource_type='video',
+            quality='auto',
+            fetch_format='auto'
+        )
+        print(f"✅ Uploaded video to Cloudinary: {result['secure_url']}")
+        return result["secure_url"]
+    except Exception as e:
+        print(f"❌ Cloudinary video upload failed: {e}")
+        raise
+
 def parse_with_groq(description):
     prompt = f"""
 You are an expert Shopify product parser for Indian fashion products. Parse ANY WhatsApp product description format and extract all fields:
@@ -418,10 +434,50 @@ def send_to_shopify(data, image_urls):
         print("❌ Shopify upload failed:", str(e))
         raise
 
+def upload_video_to_shopify(product_id, video_url, title):
+    """Upload a single video to Shopify as a product media."""
+    try:
+        shopify_url = f"https://{os.getenv('SHOPIFY_STORE_DOMAIN')}/admin/api/2024-01/products/{product_id}/media.json"
+        auth = (os.getenv("SHOPIFY_API_KEY"), os.getenv("SHOPIFY_API_PASSWORD"))
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": os.getenv("SHOPIFY_API_PASSWORD")
+        }
+
+        # Extract filename from URL
+        filename = video_url.split('/')[-1]
+        if not filename:
+            raise Exception("Could not determine filename from URL")
+
+        # Prepare payload for video media
+        payload = {
+            "media": {
+                "media_type": "video",
+                "src": video_url,
+                "alt": f"{title} - Video",
+                "position": 1 # Assuming it's the first video
+            }
+        }
+
+        response = requests.post(shopify_url, auth=auth, headers=headers, data=json.dumps(payload))
+        print(f"🎬 Video media response: {response.status_code}")
+
+        if response.status_code not in [200, 201]:
+            print(f"❌ Failed to upload video to Shopify: {response.text}")
+            raise Exception(f"Shopify API error for video upload: {response.status_code} - {response.text}")
+
+        print(f"✅ Video uploaded to Shopify: {video_url}")
+        return response.json()
+    except Exception as e:
+        print(f"❌ Video upload failed: {str(e)}")
+        raise
+
 @api_view(['POST'])
 def add_product(request):
     data = request.data
     images = data.get('images', [])
+    videos = data.get('videos', [])
     description = data.get('description', '').strip()
     sender = data.get('sender', '')
     vendor = data.get('vendor', 'DEFAULT')
@@ -429,8 +485,9 @@ def add_product(request):
     print("📥 Received product from:", sender)
     print("📝 Description:", description)
     print(f"🖼️ Total images: {len(images)}")
+    print(f"🎬 Total videos: {len(videos)}")
 
-    if not images or not description or not sender:
+    if (not images and not videos) or not description or not sender:
         return Response({"status": "error", "message": "Missing required fields"}, status=400)
 
     try:
@@ -439,6 +496,7 @@ def add_product(request):
             sender=sender,
             description=description,
             images=[img['filename'] for img in images],
+            videos=[vid['filename'] for vid in videos],
             timestamp=timezone.now()
         )
 
@@ -452,8 +510,18 @@ def add_product(request):
                 print(f"❌ Failed to upload image {img['filename']}: {e}")
                 continue
 
-        if not image_urls:
-            raise Exception("No images uploaded successfully")
+        print("⬆️ Uploading videos to Cloudinary...")
+        video_urls = []
+        for vid in videos:
+            try:
+                url = upload_to_cloudinary_video(vid)
+                video_urls.append(url)
+            except Exception as e:
+                print(f"❌ Failed to upload video {vid['filename']}: {e}")
+                continue
+
+        if not image_urls and not video_urls:
+            raise Exception("No media uploaded successfully")
 
         print("🧠 Parsing description using Groq...")
         parsed_data = parse_with_groq(description)
@@ -480,6 +548,15 @@ def add_product(request):
 
         product_id = shopify_response["product"]["id"]
         print(f"✅ Product created with ID: {product_id}")
+
+        # Upload videos to Shopify as product media (if any)
+        if video_urls:
+            print("🎬 Uploading videos to Shopify as product media...")
+            for video_url in video_urls:
+                try:
+                    upload_video_to_shopify(product_id, video_url, title)
+                except Exception as e:
+                    print(f"❌ Failed to upload video to Shopify: {e}")
 
         collections = parsed_data.get("collections", "")
         if collections:
